@@ -144,11 +144,12 @@ function normalize(json, company, date, facilityId, facilityFilter) {
     }
 
     // ── Facility filter: reject sessions from other venues ────────────────
-    // DaySmart's facility_id param is a hint, not a strict filter.
-    // We post-filter by checking the surface/resource name contains the
-    // expected facility keyword (e.g. "poway", "khs").
-    if (facilityFilter && surface) {
-      if (!surface.toLowerCase().includes(facilityFilter.toLowerCase())) {
+    // DaySmart's facility_id param is a hint, not a strict filter — it bleeds.
+    // Post-filter by surface name. If facilityFilter is set and surface is
+    // null (resource data missing from response), reject the event — we can't
+    // verify which facility it belongs to.
+    if (facilityFilter) {
+      if (!surface || !surface.toLowerCase().includes(facilityFilter.toLowerCase())) {
         filteredByFacility++;
         continue;
       }
@@ -196,20 +197,29 @@ function normalize(json, company, date, facilityId, facilityFilter) {
 }
 
 // ─── FETCH (tries include strategies until one works) ─────────────────────────
-const INCLUDE_STRATEGIES = [
+// When facilityFilter is set we MUST have resource data to filter by surface.
+// So we never fall back to the empty-include strategy in that case.
+const INCLUDE_STRATEGIES_FULL = [
   'summary,resource,homeTeam.league,homeTeam.product,facility.address',
   'summary,resource',
   '',
 ];
+const INCLUDE_STRATEGIES_FILTERED = [
+  'summary,resource,homeTeam.league,homeTeam.product,facility.address',
+  'summary,resource',
+  // no empty fallback — we need resource to filter by surface
+];
 
-async function fetchDaySmart(company, date, facilityId) {
+async function fetchDaySmart(company, date, facilityId, facilityFilter) {
   const endDate = nextDateStr(date);
   const headers = {
     'Accept':     'application/vnd.api+json, application/json',
     'User-Agent': 'IceTimeHQ/1.0 (+https://icetimehq.com)',
   };
 
-  for (const includeStr of INCLUDE_STRATEGIES) {
+  const strategies = facilityFilter ? INCLUDE_STRATEGIES_FILTERED : INCLUDE_STRATEGIES_FULL;
+
+  for (const includeStr of strategies) {
     const url = buildUrl(company, date, endDate, facilityId, includeStr);
     console.log(`[schedule] Fetching company=${company} include="${includeStr || 'none'}"`);
 
@@ -268,7 +278,7 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  const result = await fetchDaySmart(company, date, facility_id || null);
+  const result = await fetchDaySmart(company, date, facility_id || null, facility_filter || null);
 
   if (!result) {
     return res.status(200).json({
