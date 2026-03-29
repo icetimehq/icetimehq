@@ -30,19 +30,21 @@ function cleanName(raw) {
 function classifySession(name) {
   const n = name.toLowerCase();
   if (/freestyle|freeskate|free skate|figure|fs session|patch/.test(n))                              return 'freestyle';
-  if (/pick[\s-]?up|drop[\s-]in|adult hock|open hock/.test(n))                                       return 'pickup';
-  if (/stick|shoot|puck|stick time|sticktime/.test(n))                                               return 'stick';
+  if (/pick[\s-]?up|pick up|drop[\s-]in|adult hock|open hock/.test(n))                              return 'pickup';
+  if (/stick|shoot|puck|stick time|sticktime|open sticktime|open stick/.test(n))                    return 'stick';
   if (/public|open skat|general skat|family skat|adult skat|playground on ice|recreational/.test(n)) return 'public';
   return 'other';
 }
 
 // ─── EXCLUSION LIST ───────────────────────────────────────────────────────────
+// NOTE: 'camp' removed — DaySmart uses "Camp" event type for stick time and
+// freestyle blocks at The Rinks. We filter by name keywords only, not event type.
 const EXCLUDE_KEYWORDS = [
   'learn to skate', 'lts', 'learn-to-skate',
   ' vs ', 'league game', 'tournament',
   'duck shin', 'shinny',
   'goalie',
-  'camp', 'clinic',
+  'clinic',
   'private', 'rental', 'staff', 'maintenance', 'resurfac', 'admin', 'test event',
   'coach', 'private lesson', 'inside edge', 'strength and cond',
 ];
@@ -144,12 +146,11 @@ function normalize(json, company, date, facilityId, facilityFilter) {
     }
 
     // ── Facility filter: reject sessions from other venues ────────────────
-    // DaySmart's facility_id param is a hint, not a strict filter — it bleeds.
-    // Post-filter by surface name. If facilityFilter is set and surface is
-    // null (resource data missing from response), reject the event — we can't
-    // verify which facility it belongs to.
-    if (facilityFilter) {
-      if (!surface || !surface.toLowerCase().includes(facilityFilter.toLowerCase())) {
+    // DaySmart's facility_id param bleeds across facilities.
+    // Post-filter by surface name when available.
+    // If surface is null (resource data missing), trust facility_id did its job.
+    if (facilityFilter && surface) {
+      if (!surface.toLowerCase().includes(facilityFilter.toLowerCase())) {
         filteredByFacility++;
         continue;
       }
