@@ -819,6 +819,7 @@ const REGIONS = {
         location: "La Jolla, CA",
         address: "4545 La Jolla Village Dr, San Diego, CA 92122",
         url: "https://www.utcicesports.com",
+        scraper: { endpoint: "/api/scrape-bondsports", params: { rink: "utcice" } },
         schedule: [
           { type:"public",    label:"Public Skating",  start:"10:00", end:"12:00", days:[0,6] },
           { type:"public",    label:"Public Skating",  start:"13:30", end:"15:30", days:[1,2,3,4,5] },
@@ -884,7 +885,7 @@ const REGIONS = {
         location: "Anaheim, CA",
         address: "300 W Lincoln Ave, Anaheim, CA 92805",
         url: "https://anaheimice.therinks.com",
-        // daySmart: { company: "rinks", facility_id: "TBD", facilityFilter: "anaheim" },
+        daySmart: { company: "rinks", facility_id: "2", facilityFilter: "ai-" },
         schedule: [
           { type:"public", label:"Public Skating", start:"12:00", end:"14:00", days:[0,1,2,3,4,5,6] },
           { type:"stick",  label:"Stick & Puck",   start:"06:30", end:"08:00", days:[1,2,3,4,5] },
@@ -896,7 +897,7 @@ const REGIONS = {
         location: "Irvine, CA",
         address: "888 Ridge Valley, Irvine, CA 92618",
         url: "https://www.greatparkice.com",
-        // daySmart: { company: "rinks", facility_id: "TBD", facilityFilter: "great park" },
+        daySmart: { company: "rinks", facility_id: "1", facilityFilter: "gpi" },
         schedule: [
           { type:"public", label:"Public Skating", start:"13:00", end:"15:00", days:[0,1,2,3,4,5,6] },
           { type:"stick",  label:"Stick & Puck",   start:"07:00", end:"08:30", days:[1,3,5] },
@@ -908,7 +909,7 @@ const REGIONS = {
         location: "Lakewood, CA",
         address: "3975 Pixie Ave, Lakewood, CA 90712",
         url: "https://lakewoodice.therinks.com",
-        // daySmart: { company: "rinks", facility_id: "TBD", facilityFilter: "lakewood" },
+        daySmart: { company: "rinks", facility_id: "3", facilityFilter: "li-" },
         schedule: [
           { type:"public", label:"Public Skating", start:"12:00", end:"14:00", days:[0,1,2,3,4,5,6] },
           { type:"stick",  label:"Stick & Puck",   start:"06:00", end:"07:30", days:[1,2,3,4,5] },
@@ -920,7 +921,7 @@ const REGIONS = {
         location: "Yorba Linda, CA",
         address: "4975 Casa Loma Ave, Yorba Linda, CA 92886",
         url: "https://yorbalindaice.therinks.com",
-        // daySmart: { company: "rinks", facility_id: "TBD", facilityFilter: "yorba" },
+        daySmart: { company: "rinks", facility_id: "6", facilityFilter: "yorba" },
         schedule: [
           { type:"public", label:"Public Skating", start:"11:30", end:"13:30", days:[0,1,2,3,4,5,6] },
           { type:"stick",  label:"Stick & Puck",   start:"06:30", end:"08:00", days:[1,3,5,6] },
@@ -1552,11 +1553,12 @@ function populateCardBody(card, sessions, rink, dow, isLive) {
   if (visible.length === 0) {
     const msg = document.createElement("div");
     msg.className = "no-sessions";
-    msg.textContent = isLive
-      ? `No sessions found ${emptyDayLabel()}`
-      : "No sessions match active filters";
+    const href = rink.url && rink.url !== '#' ? rink.url : null;
+    msg.innerHTML = isLive
+      ? `No sessions found ${emptyDayLabel()}${href ? ` <a class="session-arrow" href="${href}" target="_blank" rel="noopener" title="Visit rink website" style="opacity:0.6;margin-left:6px;">→</a>` : ''}`
+      : `No sessions match active filters${href ? ` <a class="session-arrow" href="${href}" target="_blank" rel="noopener" title="Visit rink website" style="opacity:0.6;margin-left:6px;">→</a>` : ''}`;
     card.appendChild(msg);
-    return false; // no sessions
+    return false;
   }
 
   const list = document.createElement("div");
@@ -1583,11 +1585,15 @@ async function fetchDaySmart(rink) {
 // ─── FETCH SCRAPER SESSIONS ───────────────────────────
 async function fetchScraper(rink) {
   const date = selectedDateStr();
-  const url = `${rink.scraper.endpoint}?date=${date}`;
+  const extra = rink.scraper.params
+    ? '&' + Object.entries(rink.scraper.params).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+    : '';
+  const url = `${rink.scraper.endpoint}?date=${date}${extra}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
-  return json.sessions || [];
+  // scrape-fairfax returns array directly; scrape-bondsports also returns array
+  return Array.isArray(json) ? json : (json.sessions || []);
 }
 
 // ── BY RINK ──────────────────────────────────────────
@@ -1647,7 +1653,11 @@ function renderByRink(main, rinks) {
         const rawCount = rink.schedule.filter(s => s.days.includes(dow)).length;
         const msg = document.createElement("div");
         msg.className = "no-sessions";
-        msg.textContent = rawCount === 0 ? `No sessions found ${emptyDayLabel()}` : "No sessions match active filters";
+        const href = rink.url && rink.url !== '#' ? rink.url : null;
+        const arrow = href ? ` <a class="session-arrow" href="${href}" target="_blank" rel="noopener" title="Visit rink website" style="opacity:0.6;margin-left:6px;">→</a>` : '';
+        msg.innerHTML = rawCount === 0
+          ? `No sessions found ${emptyDayLabel()}${arrow}`
+          : `No sessions match active filters${arrow}`;
         card.appendChild(msg);
         emptyCards.push(card);
       } else {
