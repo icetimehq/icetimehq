@@ -19,21 +19,10 @@ function cacheSet(key, data) { cache.set(key, { data, ts: Date.now() }); }
 // ─── CLEAN SESSION NAME ───────────────────────────────────────────────────────
 // 1. Strip trailing date ranges:  "PI – Stick Time (3/23-3/29)" → "Stick Time"
 // 2. Strip facility prefix codes: "PI – Stick Time" → "Stick Time"
-// 3. Strip "GPI SKATER - Mon 5:30am" style prefixes → last meaningful part
 function cleanName(raw) {
   let n = (raw || '').trim();
-  // Strip trailing date ranges like (3/23-3/29) or (Mar 29-31)
   n = n.replace(/\s*\(\d{1,2}\/\d{1,2}[-–]\d{1,2}\/\d{1,2}\)\s*$/, '').trim();
-  n = n.replace(/\s*\(Mar\s+\d+-\d+\)\s*$/, '').trim();
-  // Strip facility prefix codes with dash/en-dash: "PI – ", "KHS – ", "GPI – "
   n = n.replace(/^[A-Z]{2,5}\s*[-–]\s*/, '').trim();
-  // Strip "GPI SKATER - Mon 5:30am" → take everything after last " - "
-  // These are program schedule labels, not session names
-  if (/^[A-Z\s]+ - (Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/i.test(n)) {
-    // e.g. "GPI SKATER - Mon 5:30am Open" → drop the facility+day prefix
-    n = n.replace(/^[A-Z\s]+- (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s[\d:apm]+\s*/i, '').trim();
-    if (!n) n = 'Open Session'; // fallback if nothing left
-  }
   return n;
 }
 
@@ -43,7 +32,7 @@ function classifySession(name) {
   if (/freestyle|freeskate|free skate|figure|fs session|patch/.test(n))                              return 'freestyle';
   if (/pick[\s-]?up|pick up|drop[\s-]in|adult hock|open hock/.test(n))                              return 'pickup';
   if (/stick|shoot|puck|stick time|sticktime|open sticktime|open stick/.test(n))                    return 'stick';
-  if (/public|open skat|general skat|family skat|adult skat|playground on ice|recreational/.test(n)) return 'public';
+  if (/public|open skat|general skat|family skat|adult skat|playground on ice|recreational|public session|open session/.test(n)) return 'public';
   return 'other';
 }
 
@@ -143,20 +132,6 @@ function normalize(json, company, date, facilityId, facilityFilter) {
       }
     }
     if (!rawName) rawName = attrs.desc || attrs.name || attrs.title || '';
-
-    // If summary name looks like it belongs to a different facility
-    // (e.g. "GPI SKATER - Mon 5:30am" on a KHS event), fall back to
-    // the event's own desc/name field which is more reliable
-    if (facilityFilter && rawName) {
-      const upperRaw = rawName.toUpperCase();
-      const otherPrefixes = ['GPI ', 'AI-', 'AI ', 'LI-', 'LI ', 'PI -', 'PI–', 'COREY', 'CASEY'];
-      const belongsToOther = otherPrefixes.some(p => upperRaw.startsWith(p));
-      const belongsToUs = upperRaw.includes(facilityFilter.toUpperCase());
-      if (belongsToOther && !belongsToUs) {
-        // Summary is from another facility — use event attributes directly
-        rawName = attrs.desc || attrs.name || attrs.title || rawName;
-      }
-    }
 
     // ── Clean the name ────────────────────────────────────────────────────
     const name = cleanName(rawName);
