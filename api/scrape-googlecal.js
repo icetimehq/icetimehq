@@ -8,7 +8,7 @@
 // when using the embed key Google exposes for calendar widgets.
 // calendarId confirmed from the schedule page source.
 
-const fetch = (...args) => import('node-fetch').then(m => m.default(...args));
+// Uses native fetch (Node.js 18+ / Vercel runtime)
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const RINKS = {

@@ -1,30 +1,19 @@
 // api/scrape-sportsengine.js
 // SportsEngine calendar scraper — config-driven, covers all SE1 rinks
-// ─────────────────────────────────────────────────────────────────────────────
-// SportsEngine does NOT expose a public JSON API without auth.
-// We fetch the rink's SportsEngine calendar HTML page and parse it with Cheerio.
+// CommonJS (module.exports) — required for Vercel without "type":"module"
 //
-// SportsEngine calendar pages render events in one of two ways:
-//   1. Full HTML calendar (older SE sites) — parse <table> or <ul> event lists
-//   2. JS-rendered (newer SE HQ) — initial HTML contains JSON in <script> tags
+// Tries JSON extraction from <script> tags first, then Cheerio HTML parsing.
+// Returns [] on failure so frontend shows "no sessions found" instead of error.
 //
-// Both approaches are handled below. The scraper tries the JSON-in-script
-// approach first (faster, more reliable), then falls back to HTML parsing.
-//
-// ADDING A NEW SE1 RINK:
-//   1. Find the rink's SportsEngine calendar URL
-//   2. Add one entry to the RINKS object below
-//   3. Deploy — no other code changes needed
-// ─────────────────────────────────────────────────────────────────────────────
+// ADDING A NEW RINK: add one entry to RINKS below, deploy. No other changes.
 
-const fetch = (...args) => import('node-fetch').then(m => m.default(...args));
-const cheerio = await import('cheerio').then(m => m.default ?? m);
+// Uses native fetch (Node.js 18+ / Vercel runtime)
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 const cache = new Map();
 const CACHE_TTL = 4 * 60 * 60 * 1000;
 
-// ── Session type classification ───────────────────────────────────────────────
+// ── Classify ──────────────────────────────────────────────────────────────────
 function classifyType(name = '') {
   const n = name.toLowerCase();
   if (/freestyle|freeskate|figure/.test(n))    return 'freestyle';
@@ -40,58 +29,50 @@ const EXCLUDE = /game|\bleague\b|learn.to.sk|lts|duck shinny|goalie.only|private
 const RINKS = {
 
   haymarket: {
-    name:    'Haymarket Iceplex',
-    // Main calendar URL — SportsEngine site
-    calendarUrl: 'https://www.haymarketiceplex.com/calendar',
-    // Public skate specific page (more targeted)
+    name:           'Haymarket Iceplex',
+    calendarUrl:    'https://www.haymarketiceplex.com/calendar',
     publicSkateUrl: 'https://www.haymarketiceplex.com/page/show/8615506-public-skate-schedule',
-    website: 'https://www.haymarketiceplex.com',
-    surface: 'Ice',
-    timezone: 'America/New_York',
-    price:    10.00,
-    // Note: Haymarket was migrating to DaySmart as of June 2025.
-    // If this scraper returns 0 results, check whether company=haymarket
-    // exists in DaySmart and switch this rink to DS1.
-    daysmartFallback: 'haymarket', // try this if SE calendar fails
+    website:        'https://www.haymarketiceplex.com',
+    surface:        'Ice',
+    timezone:       'America/New_York',
+    price:          10.00,
+    daysmartFallback: 'haymarket',
   },
 
   princeWilliam: {
-    name:    'Prince William Ice Center',
-    calendarUrl: 'https://www.innovativesportsva.com/page/show/357110-schedule',
+    name:           'Prince William Ice Center',
+    calendarUrl:    'https://www.innovativesportsva.com/page/show/357110-schedule',
     publicSkateUrl: 'https://www.innovativesportsva.com/page/show/357110-schedule',
-    website: 'https://www.innovativesportsva.com',
-    surface: 'Ice',
-    timezone: 'America/New_York',
-    price:    null,
+    website:        'https://www.innovativesportsva.com',
+    surface:        'Ice',
+    timezone:       'America/New_York',
+    price:          null,
   },
 
   rockville: {
-    name:    'Rockville Ice Arena',
-    calendarUrl: 'https://www.rockvilleicearena.com/page/show/2944804-public-and-stick-time-ice-schedules',
+    name:           'Rockville Ice Arena',
+    calendarUrl:    'https://www.rockvilleicearena.com/page/show/2944804-public-and-stick-time-ice-schedules',
     publicSkateUrl: 'https://www.rockvilleicearena.com/page/show/2944804-public-and-stick-time-ice-schedules',
-    website: 'https://www.rockvilleicearena.com',
-    surface: 'Ice',
-    timezone: 'America/New_York',
-    price:    null,
-    stickPrice: 18.00, // Stick Time $18; goalies free
+    website:        'https://www.rockvilleicearena.com',
+    surface:        'Ice',
+    timezone:       'America/New_York',
+    price:          null,
+    stickPrice:     18.00,
   },
 
   breakaway: {
-    name:    'Breakaway Ice Center',
-    calendarUrl: 'https://www.breakawayicecenter.com/schedule/',
+    name:           'Breakaway Ice Center',
+    calendarUrl:    'https://www.breakawayicecenter.com/schedule/',
     publicSkateUrl: 'https://www.breakawayicecenter.com/schedule/',
-    website: 'https://www.breakawayicecenter.com',
-    surface: 'Ice',
-    timezone: 'America/New_York',
-    price:    null,
+    website:        'https://www.breakawayicecenter.com',
+    surface:        'Ice',
+    timezone:       'America/New_York',
+    price:          null,
   },
 
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function to24h(h, m, period) {
   let hr = parseInt(h, 10);
   const min = String(m || '00').padStart(2, '0');
@@ -101,21 +82,14 @@ function to24h(h, m, period) {
 }
 
 function parseTimeRange(text) {
-  // Matches: "10:00 AM - 12:00 PM", "10AM-12PM", "10:00am – 12:00pm", "10-12pm"
-  const full  = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*[-–to]+\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
-  if (full) {
-    return {
-      start: to24h(full[1], full[2], full[3]),
-      end:   to24h(full[4], full[5], full[6]),
-    };
-  }
+  const full = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*[-–to]+\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+  if (full) return { start: to24h(full[1], full[2], full[3]), end: to24h(full[4], full[5], full[6]) };
   return null;
 }
 
 function buildSession(name, times, date, rink) {
   const type = classifyType(name);
-  if (!type) return null;
-  if (EXCLUDE.test(name)) return null;
+  if (!type || EXCLUDE.test(name)) return null;
   return {
     name:            name.trim().substring(0, 60),
     type,
@@ -129,13 +103,9 @@ function buildSession(name, times, date, rink) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Approach 1: Extract JSON from <script> tags (SportsEngine embeds schedule data)
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Approach 1: JSON in <script> tags ─────────────────────────────────────────
 function extractFromScripts(html, date, rink) {
   const sessions = [];
-
-  // SportsEngine sometimes embeds schedule JSON in window.__se_data or similar
   const jsonPatterns = [
     /window\.__se_data\s*=\s*({.+?});/s,
     /window\.seScheduleData\s*=\s*(\[.+?\]);/s,
@@ -155,15 +125,12 @@ function extractFromScripts(html, date, rink) {
         const startStr = ev.startTime || ev.start_time || ev.start || '';
         const endStr   = ev.endTime   || ev.end_time   || ev.end   || '';
         if (!startStr) continue;
-
         const startFmt = startStr.length === 5 ? startStr : startStr.slice(11, 16);
         const endFmt   = endStr.length === 5   ? endStr   : endStr.slice(11, 16);
-
         const type = classifyType(name);
         if (!type || EXCLUDE.test(name)) continue;
         sessions.push({
-          name:            name.trim(),
-          type,
+          name, type,
           start:           `${date}T${startFmt}:00`,
           end:             `${date}T${endFmt}:00`,
           price:           rink.price,
@@ -176,153 +143,96 @@ function extractFromScripts(html, date, rink) {
       if (sessions.length > 0) return sessions;
     } catch (_) {}
   }
-
   return sessions;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Approach 2: HTML parsing with Cheerio
-// SportsEngine calendar pages have a few different layouts:
-//   - Older: <ul class="se-events-list"> with <li> per event
-//   - Older: <table class="se-calendar-table"> with date cells
-//   - Page-based schedule: recurring table or text listing times by day
-// ─────────────────────────────────────────────────────────────────────────────
-function extractFromHTML(html, date, rink) {
+// ── Approach 2: Cheerio HTML parsing ─────────────────────────────────────────
+function extractFromHTML(html, date, rink, cheerio) {
   const $ = cheerio.load(html);
   const sessions = [];
+  const [,, dd] = date.split('-').map(Number);
+  const dayOfWeek = new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' });
 
-  const [yyyy, mm, dd] = date.split('-').map(Number);
-  const targetDateStr  = date; // YYYY-MM-DD
-  const dayOfWeek      = new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' });
-
-  // ── Try 1: Look for event elements with matching date ──
   const dateSelectors = [
-    `[data-date="${targetDateStr}"]`,
-    `[data-day="${dd}"]`,
-    `.se-calendar-day-${dd}`,
-    `#se-calendar-${dd}`,
-    `.fc-day[data-date="${targetDateStr}"]`,
+    `[data-date="${date}"]`, `[data-day="${dd}"]`,
+    `.se-calendar-day-${dd}`, `#se-calendar-${dd}`,
+    `.fc-day[data-date="${date}"]`,
   ];
 
   for (const sel of dateSelectors) {
     $(sel).each((_, el) => {
       const text = $(el).text();
-      const items = text.split(/\n/).filter(l => l.trim());
-      for (const item of items) {
-        if (EXCLUDE.test(item)) continue;
+      text.split(/\n/).filter(l => l.trim()).forEach(item => {
+        if (EXCLUDE.test(item)) return;
         const type = classifyType(item);
-        if (!type) continue;
+        if (!type) return;
         const times = parseTimeRange(item);
-        if (!times) continue;
+        if (!times) return;
         const s = buildSession(item, times, date, rink);
         if (s) sessions.push(s);
-      }
+      });
     });
     if (sessions.length > 0) return sessions;
   }
 
-  // ── Try 2: Parse schedule listed by day of week (common on SE info pages) ──
-  // e.g. "Public Skating\nMondays: 12:00 PM - 1:30 PM\nFridays: 12:00 PM - 1:30 PM"
+  // Parse schedule listed by day of week
   const fullText = $('body').text();
   const lines = fullText.split(/\n|\r/).map(l => l.trim()).filter(Boolean);
-
   let currentSessionName = '';
   for (const line of lines) {
-    // Check if line looks like a session name
     if (!line.match(/\d{1,2}:\d{2}/) && classifyType(line) && !EXCLUDE.test(line)) {
       currentSessionName = line;
       continue;
     }
-
-    // Check if line mentions the target day of week and a time
     if (!line.toLowerCase().includes(dayOfWeek.toLowerCase()) &&
         !line.toLowerCase().includes(dayOfWeek.slice(0, 3).toLowerCase())) continue;
-
     const times = parseTimeRange(line);
     if (!times) continue;
-
     const name = currentSessionName || line;
     if (EXCLUDE.test(name)) continue;
     const s = buildSession(name, times, date, rink);
     if (s) sessions.push(s);
   }
 
-  if (sessions.length > 0) return sessions;
-
-  // ── Try 3: Any time range on page that matches reasonable session keywords ──
-  const timePattern = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*[-–to]+\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/gi;
-  let m;
-  while ((m = timePattern.exec(fullText)) !== null) {
-    // Get surrounding context (100 chars before)
-    const ctxStart = Math.max(0, m.index - 100);
-    const ctx = fullText.slice(ctxStart, m.index + m[0].length + 20);
-
-    if (!classifyType(ctx) || EXCLUDE.test(ctx)) continue;
-
-    // Only include if context mentions our target day
-    if (!ctx.toLowerCase().includes(dayOfWeek.toLowerCase()) &&
-        !ctx.toLowerCase().includes(dayOfWeek.slice(0, 3).toLowerCase())) continue;
-
-    const times = { start: to24h(m[1], m[2], m[3]), end: to24h(m[4], m[5], m[6]) };
-    const name = ctx.replace(m[0], '').replace(/\s+/g, ' ').trim().substring(0, 50) || 'Public Skate';
-    const s = buildSession(name, times, date, rink);
-    if (s) sessions.push(s);
-  }
-
   return sessions;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main fetch for a single rink
-// ─────────────────────────────────────────────────────────────────────────────
-async function fetchSESchedule(rink, date) {
+// ── Main fetch ────────────────────────────────────────────────────────────────
+async function fetchSESchedule(rink, date, cheerio) {
   const url = rink.publicSkateUrl || rink.calendarUrl;
-
   const res = await fetch(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     },
+    signal: AbortSignal.timeout(8000),
   });
-
   if (!res.ok) throw new Error(`SE fetch failed: ${res.status} for ${url}`);
 
   const html = await res.text();
-
-  // Try JSON first, then HTML
   let sessions = extractFromScripts(html, date, rink);
-  if (sessions.length === 0) {
-    sessions = extractFromHTML(html, date, rink);
-  }
+  if (sessions.length === 0) sessions = extractFromHTML(html, date, rink, cheerio);
 
-  // If rink is Haymarket and SE returns nothing, try DaySmart fallback
+  // DaySmart fallback for Haymarket if SE returns nothing
   if (sessions.length === 0 && rink.daysmartFallback) {
     try {
-      const dsUrl = `https://api.daysmartrecreation.com/dash/x/api/v1/public/events?` +
-        `company=${rink.daysmartFallback}&startDate=${date}&endDate=${date}`;
-      const dsRes = await fetch(dsUrl, {
-        headers: { 'Accept': 'application/json' },
-      });
+      const dsUrl = `https://apps.daysmartrecreation.com/dash/jsonapi/api/v1/events?` +
+        `company=${rink.daysmartFallback}&filter[start_date__gte]=${date}&filter[start_date__lte]=${date}`;
+      const dsRes = await fetch(dsUrl, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) });
       if (dsRes.ok) {
         const dsData = await dsRes.json();
-        // Use same normalization as schedule.js
-        const events = dsData.data || dsData.events || dsData || [];
+        const events = dsData.data || [];
         for (const ev of events) {
-          const name = ev.name || ev.eventName || '';
+          const name = ev.attributes?.desc || ev.attributes?.name || '';
           if (EXCLUDE.test(name)) continue;
           const type = classifyType(name);
           if (!type) continue;
-          const start = (ev.startDateTime || ev.start || '').replace(' ', 'T').slice(0, 19);
-          const end   = (ev.endDateTime   || ev.end   || '').replace(' ', 'T').slice(0, 19);
-          if (!start.startsWith(date)) continue;
-          sessions.push({
-            name, type, start, end,
-            price:           ev.price ?? rink.price,
-            openSlots:       ev.spotsAvailable ?? null,
-            status:          'available',
-            surface:         rink.surface,
-            registrationUrl: rink.website,
-          });
+          const start = (ev.attributes?.start || '').replace(' ', 'T').slice(11, 16);
+          const end   = (ev.attributes?.end   || '').replace(' ', 'T').slice(11, 16);
+          if (!start) continue;
+          sessions.push({ name, type, start: `${date}T${start}:00`, end: `${date}T${end}:00`,
+            price: rink.price, openSlots: null, status: 'available',
+            surface: rink.surface, registrationUrl: rink.website });
         }
       }
     } catch (_) {}
@@ -331,40 +241,40 @@ async function fetchSESchedule(rink, date) {
   return sessions;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Handler
-// ─────────────────────────────────────────────────────────────────────────────
-export default async function handler(req, res) {
+// ── Handler ───────────────────────────────────────────────────────────────────
+module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   const { rink: rinkKey, date } = req.query;
 
   if (!rinkKey || !RINKS[rinkKey]) {
-    return res.status(400).json({
-      error: `rink param required. Valid: ${Object.keys(RINKS).join(', ')}`,
-    });
+    return res.status(400).json({ sessions: [], error: `rink param required. Valid: ${Object.keys(RINKS).join(', ')}` });
   }
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return res.status(400).json({ error: 'date param required: YYYY-MM-DD' });
+    return res.status(400).json({ sessions: [], error: 'date param required: YYYY-MM-DD' });
   }
 
   const cacheKey = `sportsengine:${rinkKey}:${date}`;
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_TTL) {
-    return res.status(200).json(cached.data);
+    return res.status(200).json({ sessions: cached.data, source: 'cache' });
   }
 
   const rink = RINKS[rinkKey];
 
+  // Import cheerio inside handler (avoids top-level await in CommonJS)
+  const cheerio = await import('cheerio').then(m => m.default ?? m);
+
   try {
-    const sessions = await fetchSESchedule(rink, date);
+    const sessions = await fetchSESchedule(rink, date, cheerio);
     sessions.sort((a, b) => (a.start || '').localeCompare(b.start || ''));
     cache.set(cacheKey, { ts: Date.now(), data: sessions });
-    return res.status(200).json(sessions);
+    return res.status(200).json({ sessions, source: 'live' });
   } catch (err) {
-    console.error(`scrape-sportsengine [${rinkKey}] error:`, err.message);
-    // Return empty rather than 500 — front-end shows "no sessions found"
+    console.error(`[scrape-sportsengine] ${rinkKey} error:`, err.message);
     cache.set(cacheKey, { ts: Date.now(), data: [] });
-    return res.status(200).json([]);
+    return res.status(200).json({ sessions: [], error: err.message });
   }
-}
+};

@@ -12,7 +12,7 @@
 // find XHR calls to sd.kroccommunity.org/s/sfsites/aura or similar,
 // and update fetchSalesforceSchedule() accordingly.
 
-const fetch = (...args) => import('node-fetch').then(m => m.default(...args));
+// Uses native fetch (Node.js 18+ / Vercel runtime)
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 const cache = new Map();
