@@ -264,8 +264,15 @@ module.exports = async function handler(req, res) {
 
   const rink = RINKS[rinkKey];
 
-  // Import cheerio inside handler (avoids top-level await in CommonJS)
-  const cheerio = await import('cheerio').then(m => m.default ?? m);
+  // Import cheerio — if not installed, return empty gracefully
+  let cheerio;
+  try {
+    cheerio = await import('cheerio').then(m => m.default ?? m);
+  } catch (e) {
+    console.error('[scrape-sportsengine] cheerio not available:', e.message);
+    cache.set(cacheKey, { ts: Date.now(), data: [] });
+    return res.status(200).json({ sessions: [], error: 'cheerio not installed' });
+  }
 
   try {
     const sessions = await fetchSESchedule(rink, date, cheerio);

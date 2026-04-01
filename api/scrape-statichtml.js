@@ -97,16 +97,24 @@ const RINKS = {
   },
 
   bennymagiera: {
-    name:            'Benny Magiera Rink',
-    strategy:        'civicplus',
-    calendarUrl:     'https://www.westwarwickri.org/calendar.aspx',
-    calendarCid:     null,
-    calendarKeyword: 'skate',
-    website:         'https://www.westwarwickri.org/index.asp?SEC=706EFDDE-B8A8-457B-8035-C96BC10019E1',
-    surface:         'Ice',
-    timezone:        'America/New_York',
-    price:           1.00,
-    sessionTypes:    ['Public Skating', 'Stick', 'Public Ice'],
+    name:     'Benny Magiera Rink',
+    strategy: 'fixed-weekly',
+    website:  'https://www.westwarwickri.org/index.asp?SEC=706EFDDE-B8A8-457B-8035-C96BC10019E1',
+    surface:  'Ice',
+    timezone: 'America/New_York',
+    price:    10.00,
+    // Source: westwarwickri.gov schedule flyer (Mar 2026)
+    // Stick & Puck: Tue/Thu/Fri 1:30–4:30pm. Schedule posted monthly as flyers.
+    // Public skate times not confirmed — update when posted.
+    schedule: {
+      0: [],
+      1: [],
+      2: [{ start: '13:30', end: '16:30', name: 'Stick & Puck', type: 'stick' }],
+      3: [],
+      4: [{ start: '13:30', end: '16:30', name: 'Stick & Puck', type: 'stick' }],
+      5: [{ start: '13:30', end: '16:30', name: 'Stick & Puck', type: 'stick' }],
+      6: [],
+    },
   },
 
   loring: {
@@ -346,24 +354,32 @@ module.exports = async function handler(req, res) {
 
   const rink = RINKS[rinkKey];
 
-  // Import cheerio inside handler (avoids top-level await in CommonJS)
-  const cheerio = await import('cheerio').then(m => m.default ?? m);
-
   try {
     let sessions = [];
 
-    switch (rink.strategy) {
-      case 'fixed-weekly':
-        sessions = buildFixedWeekly(rink, date);
-        break;
-      case 'civicplus':
-        sessions = await fetchCivicPlus(rink, date, cheerio);
-        break;
-      case 'wordpress-mycal':
-        sessions = await fetchWordPressMyCal(rink, date, cheerio);
-        break;
-      default:
-        return res.status(400).json({ sessions: [], error: `Unknown strategy: ${rink.strategy}` });
+    if (rink.strategy === 'fixed-weekly') {
+      sessions = buildFixedWeekly(rink, date);
+    } else {
+      // Only import cheerio for strategies that need it
+      let cheerio;
+      try {
+        cheerio = await import('cheerio').then(m => m.default ?? m);
+      } catch (e) {
+        console.error('[scrape-statichtml] cheerio not available:', e.message);
+        cache.set(cacheKey, { ts: Date.now(), data: [] });
+        return res.status(200).json({ sessions: [], error: 'cheerio not installed' });
+      }
+
+      switch (rink.strategy) {
+        case 'civicplus':
+          sessions = await fetchCivicPlus(rink, date, cheerio);
+          break;
+        case 'wordpress-mycal':
+          sessions = await fetchWordPressMyCal(rink, date, cheerio);
+          break;
+        default:
+          return res.status(400).json({ sessions: [], error: `Unknown strategy: ${rink.strategy}` });
+      }
     }
 
     sessions.sort((a, b) => (a.start || '').localeCompare(b.start || ''));
