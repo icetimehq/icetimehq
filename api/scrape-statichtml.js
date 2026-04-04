@@ -30,7 +30,7 @@ const EXCLUDE = /game|learn.to.skat|lts|duck shinny|goalie.only|private|tourname
 // ── Config — metadata from rinks.json, schedule data inline ──────────────────
 const fs   = require('fs');
 const path = require('path');
-const _allRinks = JSON.parse(fs.readFileSync(path.join(__dirname, 'rinks.json'), 'utf8'));
+const _allRinks = JSON.parse(fs.readFileSync(path.join(__dirname, '../data/rinks.json'), 'utf8'));
 const _shMeta   = Object.fromEntries(
   Object.values(_allRinks)
     .filter(r => r.scraper_file === 'api/scrape-statichtml.js' && r.scraper_key)
