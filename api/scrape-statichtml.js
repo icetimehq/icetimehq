@@ -102,6 +102,25 @@ const RINK_SCHEDULES = {
     },
   },
 
+  rockville: {
+    strategy: 'fixed-weekly',
+    surface:  'Ice',
+    timezone: 'America/New_York',
+    price:    null,
+    // Source: rockvilleicearena.com calendar (confirmed via Google cache Apr 2026)
+    // Stick Time $18/skater, goalies free. Verify times at:
+    // rockvilleicearena.com/page/show/2944804-public-and-stick-time-ice-schedules
+    schedule: {
+      0: [],
+      1: [{ start: '12:00', end: '14:00', name: 'Public Skating', type: 'public' }],
+      2: [{ start: '12:00', end: '14:00', name: 'Public Skating', type: 'public' }],
+      3: [],
+      4: [],
+      5: [{ start: '12:00', end: '14:00', name: 'Public Skating', type: 'public' }],
+      6: [],
+    },
+  },
+
   // ── STRATEGY B: CivicPlus HTML ────────────────────────────────────────────
 
   stoneham: {
