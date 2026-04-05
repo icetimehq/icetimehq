@@ -193,8 +193,8 @@ function parseTimeMatch(timeStr, context, date, rink) {
   return {
     name:            name.substring(0, 50),
     type:            classifyType(name),
-    start:           `${date}T${start}:00`,
-    end:             `${date}T${end}:00`,
+    start:           `${start}`,
+    end:             `${end}`,
     price:           rink.price,
     openSlots:       null,
     status:          'available',
@@ -216,8 +216,8 @@ function buildFixedWeekly(rink, date) {
   return slots.map(slot => ({
     name:            slot.name || 'Public Skate',
     type:            slot.type || 'public',
-    start:           `${date}T${slot.start}:00`,
-    end:             `${date}T${slot.end}:00`,
+    start:           `${slot.start}`,
+    end:             `${slot.end}`,
     price:           rink.price,
     openSlots:       null,
     status:          'available',
@@ -336,8 +336,8 @@ async function fetchWordPressMyCal(rink, date, cheerio) {
       sessions.push({
         name:            eventName || 'Public Skate',
         type:            classifyType(eventName),
-        start:           `${date}T${start}:00`,
-        end:             `${date}T${end}:00`,
+        start:           `${start}`,
+        end:             `${end}`,
         price:           rink.price,
         openSlots:       null,
         status:          'available',
