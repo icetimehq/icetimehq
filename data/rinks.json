@@ -87,7 +87,7 @@
     "facility_filter": null,
     "scraper_key": "haymarket",
     "scraper_file": "api/scrape-sportsengine.js",
-    "status": "live"
+    "status": "needs_audit"
   },
   "dc_loudoun": {
     "rink_id": "dc_loudoun",
@@ -132,7 +132,7 @@
     "facility_filter": null,
     "scraper_key": "princeWilliam",
     "scraper_file": "api/scrape-sportsengine.js",
-    "status": "live"
+    "status": "needs_audit"
   },
   "dc_stjames": {
     "rink_id": "dc_stjames",
@@ -192,7 +192,7 @@
     "facility_filter": null,
     "scraper_key": "rockville",
     "scraper_file": "api/scrape-sportsengine.js",
-    "status": "live"
+    "status": "needs_audit"
   },
   "dc_tuckerroad": {
     "rink_id": "dc_tuckerroad",
@@ -732,7 +732,7 @@
     "facility_filter": null,
     "scraper_key": "breakaway",
     "scraper_file": "api/scrape-sportsengine.js",
-    "status": "live"
+    "status": "needs_audit"
   },
   "ma_foxboro": {
     "rink_id": "ma_foxboro",
