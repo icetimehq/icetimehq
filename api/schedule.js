@@ -1,347 +1,382 @@
-// /api/schedule.js — IceTimeHQ DaySmart Proxy
-// v6 — facility bleed fix (post-filter by surface name), registration URL fix for The Rinks
-// CommonJS (module.exports) — required for Vercel without "type":"module"
+const fs = require("fs");
+const path = require("path");
 
-const DAYSMART_BASE = 'https://apps.daysmartrecreation.com/dash/jsonapi/api/v1/events';
-
-// ─── CACHE (60 min) ──────────────────────────────────────────────────────────
+const CACHE_TTL_MS = 60 * 60 * 1000;
 const cache = new Map();
-const CACHE_TTL = 60 * 60 * 1000;
+const RINKS_PATH = path.join(process.cwd(), "data", "rinks.json");
 
-function cacheGet(key) {
-  const e = cache.get(key);
-  if (!e) return null;
-  if (Date.now() - e.ts > CACHE_TTL) { cache.delete(key); return null; }
-  return e.data;
+function loadRinks() {
+  const raw = fs.readFileSync(RINKS_PATH, "utf8");
+  const parsed = JSON.parse(raw);
+  return parsed.rinks || [];
 }
-function cacheSet(key, data) { cache.set(key, { data, ts: Date.now() }); }
 
-// ─── CLEAN SESSION NAME ───────────────────────────────────────────────────────
-// 1. Strip trailing date ranges:  "PI – Stick Time (3/23-3/29)" → "Stick Time"
-// 2. Strip facility prefix codes: "PI – Stick Time" → "Stick Time"
-// 3. Strip "GPI SKATER - Mon 5:30am" style prefixes → last meaningful part
-function cleanName(raw) {
-  let n = (raw || '').trim();
-  // Strip trailing date ranges like (3/23-3/29) or (Mar 29-31)
-  n = n.replace(/\s*\(\d{1,2}\/\d{1,2}[-–]\d{1,2}\/\d{1,2}\)\s*$/, '').trim();
-  n = n.replace(/\s*\(Mar\s+\d+-\d+\)\s*$/, '').trim();
-  // Strip facility prefix codes with dash/en-dash: "PI – ", "KHS – ", "GPI – "
-  n = n.replace(/^[A-Z]{2,5}\s*[-–]\s*/, '').trim();
-  // Strip "GPI SKATER - Mon 5:30am" → take everything after last " - "
-  // These are program schedule labels, not session names
-  if (/^[A-Z\s]+ - (Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/i.test(n)) {
-    // e.g. "GPI SKATER - Mon 5:30am Open" → drop the facility+day prefix
-    n = n.replace(/^[A-Z\s]+- (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s[\d:apm]+\s*/i, '').trim();
-    if (!n) n = 'Open Session'; // fallback if nothing left
+function getCache(key) {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
   }
-  return n;
+  return hit.value;
 }
 
-// ─── CLASSIFY by cleaned session name ────────────────────────────────────────
-function classifySession(name) {
-  const n = name.toLowerCase();
-  if (/freestyle|freeskate|free skate|figure|fs session|patch/.test(n))                              return 'freestyle';
-  if (/pick[\s-]?up|pick up|drop[\s-]in|adult hock|open hock/.test(n))                              return 'pickup';
-  if (/stick|shoot|puck|stick time|sticktime|open sticktime|open stick/.test(n))                    return 'stick';
-  if (/public|open skat|general skat|family skat|adult skat|playground on ice|recreational|public session|open session/.test(n)) return 'public';
-  return 'other';
+function setCache(key, value) {
+  cache.set(key, { ts: Date.now(), value });
 }
 
-// ─── EXCLUSION LIST ───────────────────────────────────────────────────────────
-// NOTE: 'camp' removed — DaySmart uses "Camp" event type for stick time and
-// freestyle blocks at The Rinks. We filter by name keywords only, not event type.
-const EXCLUDE_KEYWORDS = [
-  'learn to skate', 'lts', 'learn-to-skate',
-  ' vs ', 'league game', 'tournament',
-  'duck shin', 'shinny',
-  'goalie',
-  'clinic',
-  'private', 'rental', 'staff', 'maintenance', 'resurfac', 'admin', 'test event',
-  'coach', 'private lesson', 'inside edge', 'strength and cond',
-];
+function toHm(isoLike) {
+  if (!isoLike) return "";
+  const d = new Date(isoLike);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(11, 16);
+}
 
-function shouldExclude(cleanedName, resourceId) {
-  if (resourceId === 21) return true;
-  const n = cleanedName.toLowerCase();
-  if (EXCLUDE_KEYWORDS.some(kw => n.includes(kw))) return true;
+function classifySession(name = "") {
+  const v = name.toLowerCase();
+  if (/(public|playground on ice|adult skate)/i.test(v)) return "public";
+  if (/(stick|shoot|puck)/i.test(v)) return "stick";
+  if (/(pickup|pick up|drop-in hockey|adult pickup)/i.test(v)) return "pickup";
+  if (/(freestyle|freeskate|figure)/i.test(v)) return "freestyle";
+  return "other";
+}
+
+function shouldExcludeInternal({ name = "", resourceId, registerCapacity, hteamId }) {
+  const internalKeywords = [
+    "coach",
+    "guest coach",
+    "private lesson instructor",
+    "inside edge training",
+    "strength and conditioning",
+  ];
+  const lower = String(name).toLowerCase();
+
+  if (String(resourceId) === "21") return true;
+  if (internalKeywords.some((x) => lower.includes(x))) return true;
+  if ((registerCapacity === 0 || registerCapacity === "0") && (hteamId === null || hteamId === undefined || hteamId === "")) {
+    return true;
+  }
   return false;
 }
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-function parseTime(iso) {
-  const m = (iso || '').match(/T(\d{2}:\d{2})/);
-  return m ? m[1] : null;
+function buildRegistrationUrl({ company, date, facilityId }) {
+  let url = `https://apps.daysmartrecreation.com/dash/x/#/online/${company}/event-registration?date=${date}`;
+  if (facilityId) url += `&facility_ids=${facilityId}`;
+  return url;
 }
 
-// ─── REGISTRATION URL ─────────────────────────────────────────────────────────
-// The Rinks (company=rinks) uses a calendar URL with location= parameter.
-// All other companies use the standard event-registration URL.
-function buildRegUrl(company, date, facilityId) {
-  if (company === 'rinks' && facilityId) {
-    return `https://apps.daysmartrecreation.com/dash/x/#/online/rinks/calendar`
-      + `?start=${date}&end=${date}&location=${facilityId}`;
-  }
-  return `https://apps.daysmartrecreation.com/dash/x/#/online/${company}/event-registration?date=${date}`;
+function getIncludedMap(included = [], type) {
+  const map = new Map();
+  included
+    .filter((x) => x.type === type)
+    .forEach((x) => map.set(String(x.id), x));
+  return map;
 }
 
-function nextDateStr(date) {
-  const [y, m, d] = date.split('-').map(Number);
-  const nd = new Date(y, m - 1, d + 1);
-  return [
-    nd.getFullYear(),
-    String(nd.getMonth() + 1).padStart(2, '0'),
-    String(nd.getDate()).padStart(2, '0'),
-  ].join('-');
+function normalizeDaySmartEvent(event, maps, rink, date) {
+  const attrs = event.attributes || {};
+  const relationships = event.relationships || {};
+
+  const resourceId = relationships.resource?.data?.id ?? attrs.resource_id ?? null;
+  const summaryId = relationships.summary?.data?.id ?? null;
+  const productId = relationships.homeTeam?.data?.id ?? relationships.product?.data?.id ?? null;
+
+  const resource = maps.resources.get(String(resourceId));
+  const summary = maps.summaries.get(String(summaryId));
+  const product = maps.products.get(String(productId));
+
+  const rawName =
+    rink.company === "sdia"
+      ? (attrs.desc || summary?.attributes?.name || "")
+      : (summary?.attributes?.name || attrs.desc || attrs.name || "");
+
+  const registerCapacity = attrs.register_capacity ?? summary?.attributes?.register_capacity ?? null;
+  const hteamId = attrs.hteam_id ?? null;
+
+  if (shouldExcludeInternal({ name: rawName, resourceId, registerCapacity, hteamId })) return null;
+
+  return {
+    eventId: String(event.id),
+    resourceId: resourceId != null ? String(resourceId) : "",
+    facilityId: String(attrs.facility_id ?? relationships.facility?.data?.id ?? ""),
+    name: rawName,
+    type: classifySession(rawName),
+    start: toHm(attrs.start),
+    end: toHm(attrs.end),
+    price: product?.attributes?.price ?? null,
+    openSlots: summary?.attributes?.open_slots ?? null,
+    status: summary?.attributes?.registration_status ?? "unknown",
+    surface: resource?.attributes?.name || "",
+    registrationUrl: buildRegistrationUrl({
+      company: rink.company,
+      date,
+      facilityId: rink.platform === "DS2" ? rink.facility_id : null,
+    }),
+  };
 }
 
-// ─── BUILD URL (manual — never use URLSearchParams, it encodes brackets) ─────
-function buildUrl(company, date, endDate, facilityId, includeStr) {
-  const parts = [
-    'cache[save]=false',
-    'page[size]=50',
-    'sort=end,start',
-    `filter[start_date__gte]=${date}`,
-    `filter[start_date__lte]=${endDate}`,
-    'filter[unconstrained]=1',
-    `company=${encodeURIComponent(company)}`,
-  ];
-  if (includeStr) parts.push(`include=${encodeURIComponent(includeStr)}`);
-  if (facilityId) parts.push(`filter[facility_ids][]=${facilityId}`);
-  return `${DAYSMART_BASE}?${parts.join('&')}`;
+function filterDs2Event(normalized, rink) {
+  const facilityOk =
+    !rink.facility_id || String(normalized.facilityId) === String(rink.facility_id);
+
+  const allowedResourceIds = (rink.allowed_resource_ids || []).map(String).filter(Boolean);
+  const resourceOk =
+    allowedResourceIds.length === 0
+      ? true
+      : allowedResourceIds.includes(String(normalized.resourceId));
+
+  const fallbackSurfaceOk =
+    resourceOk ||
+    (allowedResourceIds.length === 0 &&
+      rink.facility_filter &&
+      String(normalized.surface || "").toLowerCase().includes(String(rink.facility_filter).toLowerCase()));
+
+  return facilityOk && fallbackSurfaceOk;
 }
 
-// ─── NORMALIZE ───────────────────────────────────────────────────────────────
-// facilityFilter: optional lowercase substring to match against surface name.
-// Used to prevent multi-facility bleed when company=rinks serves multiple venues.
-function normalize(json, company, date, facilityId, facilityFilter) {
-  const events   = json.data     || [];
-  const included = json.included || [];
-
-  const idx = {};
-  for (const item of included) idx[`${item.type}::${item.id}`] = item;
-
-  const sessions = [];
-  let filteredByFacility = 0;
-
-  for (const ev of events) {
-    const attrs = ev.attributes || {};
-    const rels  = ev.relationships || {};
-
-    // ── Raw session name ──────────────────────────────────────────────────
-    let rawName = '';
-    let openSlots = null;
-    let status = 'unknown';
-
-    const sumRel = rels.summary?.data;
-    if (sumRel) {
-      const sum = idx[`${sumRel.type}::${sumRel.id}`];
-      if (sum) {
-        const sa  = sum.attributes || {};
-        rawName   = sa.name || sa.desc || sa.title || '';
-        openSlots = sa.open_slots ?? null;
-        status    = sa.registration_status || 'unknown';
-      }
-    }
-    if (!rawName) rawName = attrs.desc || attrs.name || attrs.title || '';
-
-    // If summary name looks like it belongs to a different facility
-    // (e.g. "GPI SKATER - Mon 5:30am" on a KHS event), fall back to
-    // the event's own desc/name field which is more reliable
-    if (facilityFilter && rawName) {
-      const upperRaw = rawName.toUpperCase();
-      const otherPrefixes = ['GPI ', 'AI-', 'AI ', 'LI-', 'LI ', 'PI -', 'PI–', 'COREY', 'CASEY'];
-      const belongsToOther = otherPrefixes.some(p => upperRaw.startsWith(p));
-      const belongsToUs = upperRaw.includes(facilityFilter.toUpperCase());
-      if (belongsToOther && !belongsToUs) {
-        // Summary is from another facility — use event attributes directly
-        rawName = attrs.desc || attrs.name || attrs.title || rawName;
-      }
-    }
-
-    // ── Clean the name ────────────────────────────────────────────────────
-    const name = cleanName(rawName);
-
-    // ── Resource / surface ────────────────────────────────────────────────
-    let surface = null, resourceId = null;
-    const resRel = rels.resource?.data;
-    if (resRel) {
-      resourceId = Number(resRel.id);
-      const res  = idx[`${resRel.type}::${resRel.id}`];
-      if (res) surface = res.attributes?.name || null;
-    }
-
-    // ── Facility filter: reject sessions from other venues ────────────────
-    // DaySmart's facility_id param bleeds across facilities.
-    // Post-filter by surface name when available.
-    // If surface is null (resource data missing), trust facility_id did its job.
-    if (facilityFilter && surface) {
-      if (!surface.toLowerCase().includes(facilityFilter.toLowerCase())) {
-        filteredByFacility++;
-        continue;
-      }
-    }
-
-    // ── Price ─────────────────────────────────────────────────────────────
-    let price = null;
-    const prodRel = rels['homeTeam.product']?.data || rels.product?.data;
-    if (prodRel) {
-      const prod = idx[`${prodRel.type}::${prodRel.id}`];
-      if (prod) price = prod.attributes?.price ?? null;
-    }
-
-    // ── Exclude & classify ────────────────────────────────────────────────
-    if (shouldExclude(name, resourceId)) continue;
-
-    const type  = classifySession(name);
-    const start = parseTime(attrs.start);
-    const end   = parseTime(attrs.end);
-    if (!start || !end) continue;
-
-    sessions.push({
-      id: ev.id, name, type, label: name,
-      start, end,
-      price:           price !== null ? Number(price) : null,
-      openSlots, status, surface,
-      registrationUrl: buildRegUrl(company, date, facilityId),
-    });
-  }
-
-  // Sort by start time
-  sessions.sort((a, b) => a.start.localeCompare(b.start));
-
-  // ── Deduplicate same-time/surface/type ───────────────────────────────────
-  const seen = new Set();
-  const deduped = sessions.filter(s => {
-    const key = `${s.start}::${s.end}::${s.surface || ''}::${s.type}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+async function fetchJson(url) {
+  const res = await fetch(url, {
+    headers: {
+      "accept": "application/vnd.api+json, application/json, text/plain, */*",
+      "user-agent": "IceTimeHQ/1.0",
+    },
   });
 
-  console.log(`[schedule] ${company}${facilityFilter ? `(${facilityFilter})` : ''} ${date}: raw=${events.length} facilityFiltered=${filteredByFacility} kept=${deduped.length}`);
-  return deduped;
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    const err = new Error(`Fetch failed ${res.status}: ${body.slice(0, 300)}`);
+    err.status = res.status;
+    throw err;
+  }
+
+  return res.json();
 }
 
-// ─── FETCH (tries include strategies until one works) ─────────────────────────
-// When facilityFilter is set we MUST have resource data to filter by surface.
-// So we never fall back to the empty-include strategy in that case.
-const INCLUDE_STRATEGIES_FULL = [
-  'summary,resource,homeTeam.league,homeTeam.product,facility.address',
-  'summary,resource',
-  '',
-];
-const INCLUDE_STRATEGIES_FILTERED = [
-  'summary,resource,homeTeam.league,homeTeam.product,facility.address',
-  'summary,resource',
-  // no empty fallback — we need resource to filter by surface
-];
+async function fetchText(url) {
+  const res = await fetch(url, {
+    headers: { "user-agent": "IceTimeHQ/1.0" },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    const err = new Error(`Fetch failed ${res.status}: ${body.slice(0, 300)}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.text();
+}
 
-async function fetchDaySmart(company, date, facilityId, facilityFilter) {
-  const endDate = nextDateStr(date);
-  const headers = {
-    'Accept':     'application/vnd.api+json, application/json',
-    'User-Agent': 'IceTimeHQ/1.0 (+https://icetimehq.com)',
+async function fetchDaySmart(rink, date) {
+  const params = new URLSearchParams();
+  params.set("cache[save]", "false");
+  params.set("page[size]", "50");
+  params.set("sort", "end,start");
+  params.set("include", "summary,resource,homeTeam.league,homeTeam.product,facility.address");
+  params.set("filter[start_date__gte]", date);
+  const nextDate = new Date(`${date}T00:00:00Z`);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  params.set("filter[start_date__lte]", nextDate.toISOString().slice(0, 10));
+  params.set("filter[unconstrained]", "1");
+  params.set("company", rink.company);
+
+  if (rink.facility_id) {
+    params.set("filter[facility_id]", String(rink.facility_id));
+  }
+
+  const url = `https://apps.daysmartrecreation.com/dash/jsonapi/api/v1/events?${params.toString()}`;
+  const cacheKey = `daysmart:${rink.rink_id}:${date}:${rink.company}:${rink.facility_id || ""}`;
+  const cached = getCache(cacheKey);
+  if (cached) return cached;
+
+  const payload = await fetchJson(url);
+  const maps = {
+    summaries: getIncludedMap(payload.included, "event-summaries"),
+    resources: getIncludedMap(payload.included, "resources"),
+    products: getIncludedMap(payload.included, "products"),
   };
 
-  const strategies = facilityFilter ? INCLUDE_STRATEGIES_FILTERED : INCLUDE_STRATEGIES_FULL;
+  let sessions = (payload.data || [])
+    .map((event) => normalizeDaySmartEvent(event, maps, rink, date))
+    .filter(Boolean);
 
-  for (const includeStr of strategies) {
-    const url = buildUrl(company, date, endDate, facilityId, includeStr);
-    console.log(`[schedule] Fetching company=${company} include="${includeStr || 'none'}"`);
+  if (rink.platform === "DS2") {
+    sessions = sessions.filter((s) => filterDs2Event(s, rink));
+  }
 
-    let res;
-    try {
-      res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
-    } catch (err) {
-      console.error(`[schedule] Fetch error: ${err.message}`);
+  setCache(cacheKey, sessions);
+  return sessions;
+}
+
+function parseIcsDate(icsValue) {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/.exec(icsValue || "");
+  if (!m) return null;
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+}
+
+function unfoldIcs(text) {
+  return text.replace(/\r?\n[ \t]/g, "");
+}
+
+function parseIcsEvents(text) {
+  const blocks = unfoldIcs(text).split("BEGIN:VEVENT").slice(1);
+  return blocks.map((block) => {
+    const event = {};
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith("END:VEVENT")) break;
+      const idx = line.indexOf(":");
+      if (idx === -1) continue;
+      const key = line.slice(0, idx).split(";")[0];
+      const value = line.slice(idx + 1);
+      event[key] = value;
+    }
+    return event;
+  });
+}
+
+async function fetchRockville(rink, date) {
+  const cacheKey = `rockville:${rink.rink_id}:${date}`;
+  const cached = getCache(cacheKey);
+  if (cached) return cached;
+
+  const ics = await fetchText(rink.ical_url);
+  const events = parseIcsEvents(ics);
+  const sessions = events
+    .filter((evt) => {
+      const start = parseIcsDate(evt.DTSTART);
+      return start && start.toISOString().slice(0, 10) === date;
+    })
+    .map((evt, idx) => {
+      const start = parseIcsDate(evt.DTSTART);
+      const end = parseIcsDate(evt.DTEND);
+      const name = evt.SUMMARY || "";
+      return {
+        eventId: evt.UID || String(idx),
+        resourceId: "",
+        facilityId: "",
+        name,
+        type: classifySession(name),
+        start: start ? start.toISOString().slice(11, 16) : "",
+        end: end ? end.toISOString().slice(11, 16) : "",
+        price: null,
+        openSlots: null,
+        status: "unknown",
+        surface: "",
+        registrationUrl: rink.website || "",
+      };
+    });
+
+  setCache(cacheKey, sessions);
+  return sessions;
+}
+
+function stripHtml(value = "") {
+  return String(value).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function to24h(value = "") {
+  const m = /(\d{1,2}):?(\d{2})?\s*([AP])/i.exec(value);
+  if (!m) return value;
+  let hh = parseInt(m[1], 10);
+  const mm = m[2] || "00";
+  const ap = m[3].toUpperCase();
+  if (ap === "P" && hh !== 12) hh += 12;
+  if (ap === "A" && hh === 12) hh = 0;
+  return `${String(hh).padStart(2, "0")}:${mm}`;
+}
+
+async function fetchFrontline(rink, date) {
+  const cacheKey = `frontline:${rink.rink_id}:${date}`;
+  const cached = getCache(cacheKey);
+  if (cached) return cached;
+
+  const html = await fetchText(rink.frontline.schedule_url);
+  const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
+  const sessions = [];
+
+  for (const [_, rowHtml] of rows) {
+    const cells = [...rowHtml.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((m) => stripHtml(m[1]));
+    if (cells.length < 2) continue;
+
+    const dateLike = cells.find((c) => /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(c));
+    if (dateLike && !dateLike.includes(date.slice(5).replace("-", "/"))) {
       continue;
     }
 
-    console.log(`[schedule] Status ${res.status} company=${company}`);
+    const timeCell = cells.find((c) => /\d/.test(c) && /[AP]/i.test(c));
+    const nameCell = cells.find((c) => /public|pickup|pick up|stick|hockey|freestyle|figure|skate/i.test(c)) || cells[1];
 
-    if (res.ok) {
-      const json = await res.json();
-      console.log(`[schedule] Raw events: ${(json.data || []).length}`);
-      return { json, includeStr };
-    }
+    if (!timeCell || !nameCell) continue;
 
-    if (res.status >= 400 && res.status < 500) {
-      const body = await res.text().catch(() => '');
-      console.error(`[schedule] ${res.status}: ${body.slice(0, 200)}`);
-      return null;
-    }
+    const timeParts = timeCell.split(/\s*-\s*/);
+    const start = to24h(timeParts[0] || "");
+    const end = to24h(timeParts[1] || "");
 
-    const errBody = await res.text().catch(() => '');
-    console.warn(`[schedule] 500 with include="${includeStr}" — trying simpler. ${errBody.slice(0, 100)}`);
+    sessions.push({
+      eventId: `${rink.rink_id}-${sessions.length + 1}`,
+      resourceId: "",
+      facilityId: "",
+      name: nameCell,
+      type: classifySession(nameCell),
+      start,
+      end,
+      price: null,
+      openSlots: null,
+      status: "unknown",
+      surface: "",
+      registrationUrl: rink.frontline.schedule_url,
+    });
   }
 
+  setCache(cacheKey, sessions);
+  return sessions;
+}
+
+async function resolveRink({ rinkId, company }) {
+  const rinks = loadRinks();
+  if (rinkId) return rinks.find((r) => r.rink_id === rinkId) || null;
+  if (company) return rinks.find((r) => r.company === company) || null;
   return null;
 }
 
-// ─── HANDLER ─────────────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
+  const date = req.query.date;
+  const rinkId = req.query.rink_id || req.query.rinkId;
+  const company = req.query.company;
 
-  const { company, date, facility_id, facility_filter, debug } = req.query;
-
-  if (!company || !date) {
-    return res.status(400).json({ error: 'Missing: company, date', sessions: [] });
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return res.status(400).json({ error: 'Date must be YYYY-MM-DD', sessions: [] });
+  if (!date) {
+    return res.status(400).json({ error: true, message: "date is required" });
   }
 
-  // Include facility_filter in cache key so Poway and KHS cache separately
-  const cacheKey = `${company}::${date}::${facility_id || ''}::${facility_filter || ''}`;
+  try {
+    const rink = await resolveRink({ rinkId, company });
 
-  if (!debug) {
-    const hit = cacheGet(cacheKey);
-    if (hit) {
-      res.setHeader('X-Cache', 'HIT');
-      return res.status(200).json({ sessions: hit, source: 'cache' });
+    if (!rink) {
+      return res.status(404).json({ error: true, message: "Rink not found in rinks.json" });
     }
-  }
 
-  const result = await fetchDaySmart(company, date, facility_id || null, facility_filter || null);
+    let sessions = [];
+    if (rink.platform === "DS1" || rink.platform === "DS2") {
+      sessions = await fetchDaySmart(rink, date);
+    } else if (rink.platform === "ROCKVILLE_ICAL") {
+      sessions = await fetchRockville(rink, date);
+    } else if (rink.platform === "FL1") {
+      sessions = await fetchFrontline(rink, date);
+    } else {
+      return res.status(400).json({ error: true, message: `Unsupported platform: ${rink.platform}` });
+    }
 
-  if (!result) {
     return res.status(200).json({
+      error: false,
+      rink_id: rink.rink_id,
+      platform: rink.platform,
+      resourceFilterStrict: rink.platform !== "DS2" ? null : (rink.allowed_resource_ids || []).length > 0,
+      sessions,
+    });
+  } catch (err) {
+    console.error("schedule handler failed", err);
+    return res.status(200).json({
+      error: true,
+      message: err.message,
       sessions: [],
-      error: 'All DaySmart strategies failed — check Vercel logs',
     });
   }
-
-  const { json, includeStr } = result;
-
-  // Debug mode — inspect raw DaySmart response
-  if (debug === '1') {
-    const allSurfaces = (json.included || [])
-      .filter(i => i.type === 'resources')
-      .map(i => i.attributes?.name || '(empty)');
-
-    return res.status(200).json({
-      _debug: true,
-      facilityFilter:      facility_filter || null,
-      includeStrategyUsed: includeStr,
-      rawEventCount:       (json.data || []).length,
-      allIncludedTypes:    [...new Set((json.included || []).map(i => i.type))],
-      allSurfaces,
-      sampleSummaryNames:  (json.included || [])
-        .filter(i => i.type === 'event-summaries')
-        .slice(0, 20)
-        .map(i => ({
-          raw:     i.attributes?.name || i.attributes?.desc || '(empty)',
-          cleaned: cleanName(i.attributes?.name || i.attributes?.desc || ''),
-          type:    classifySession(cleanName(i.attributes?.name || i.attributes?.desc || '')),
-        })),
-      sampleEvents: (json.data || []).slice(0, 3),
-    });
-  }
-
-  const sessions = normalize(json, company, date, facility_id || null, facility_filter || null);
-  cacheSet(cacheKey, sessions);
-  res.setHeader('X-Cache', 'MISS');
-  return res.status(200).json({ sessions, source: 'live' });
 };
