@@ -186,13 +186,13 @@
     "address": "50 Southlawn Ln",
     "city": "Rockville, MD 20850",
     "website": "https://www.rockvilleicearena.com",
-    "platform": "statichtml",
+    "platform": "rockville",
     "company": null,
     "facility_id": null,
     "facility_filter": null,
-    "scraper_key": "rockville",
-    "scraper_file": "api/scrape-statichtml.js",
-    "status": "planned"
+    "scraper_key": null,
+    "scraper_file": "api/scrape-rockville.js",
+    "status": "live"
   },
   "dc_tuckerroad": {
     "rink_id": "dc_tuckerroad",
