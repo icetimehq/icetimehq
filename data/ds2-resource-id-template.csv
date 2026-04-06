@@ -1,0 +1,7 @@
+rink_id,rink_name,company,facility_id,facility_filter,allowed_resource_ids,status
+sd_poway,Poway ICE,rinks,4,poway,,FILL_THIS_WITH_NUMERIC_DAYSMART_RESOURCE_IDS
+la_anaheim,Anaheim ICE,rinks,2,ai-,,FILL_THIS_WITH_NUMERIC_DAYSMART_RESOURCE_IDS
+la_greatpark,Great Park Ice,rinks,1,gpi,,FILL_THIS_WITH_NUMERIC_DAYSMART_RESOURCE_IDS
+la_lakewood,Lakewood ICE,rinks,3,li-,,FILL_THIS_WITH_NUMERIC_DAYSMART_RESOURCE_IDS
+la_yorbalinda,Yorba Linda ICE,rinks,6,yorba,,FILL_THIS_WITH_NUMERIC_DAYSMART_RESOURCE_IDS
+la_khs,KHS Ice,rinks,9,khs,,FILL_THIS_WITH_NUMERIC_DAYSMART_RESOURCE_IDS
