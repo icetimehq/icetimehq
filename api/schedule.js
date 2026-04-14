@@ -105,7 +105,12 @@ function buildUrl(company, date, endDate, facilityId, includeStr) {
     'filter[unconstrained]=1',
     `company=${encodeURIComponent(company)}`,
   ];
-  if (includeStr) parts.push(`include=${encodeURIComponent(includeStr)}`);
+  // Build include[] with bracket notation — encodeURIComponent breaks commas
+  if (includeStr) {
+    includeStr.split(',').forEach(inc => {
+      parts.push(`include[]=${inc.trim()}`);
+    });
+  }
   if (facilityId) parts.push(`filter[facility_ids][]=${facilityId}`);
   return `${DAYSMART_BASE}?${parts.join('&')}`;
 }
@@ -318,7 +323,7 @@ module.exports = async function handler(req, res) {
   // Debug mode — inspect raw DaySmart response
   if (debug === '1') {
     const allSurfaces = (json.included || [])
-      .filter(i => i.type === 'resources')
+      .filter(i => i.type === 'resource' || i.type === 'resources')
       .map(i => i.attributes?.name || '(empty)');
 
     return res.status(200).json({

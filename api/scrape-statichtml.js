@@ -121,6 +121,53 @@ const RINK_SCHEDULES = {
     },
   },
 
+  carlsbad: {
+    strategy: 'fixed-weekly',
+    surface:  'Ice',
+    timezone: 'America/Los_Angeles',
+    price:    null,
+    // Source: bondsports.co/activity/programs/CO_ED-adult-HOCKEY/11242
+    // April 2026 Stick Time Sessions calendar image — verified Apr 12 2026
+    // NOTE: Schedule is subject to change — check registration page for updates
+    schedule: {
+      0: [],                                                                    // Sun
+      1: [                                                                      // Mon
+        { start: '13:30', end: '14:30', name: 'Stick Time', type: 'stick' },
+        { start: '17:00', end: '18:00', name: 'Stick Time', type: 'stick' },
+      ],
+      2: [],                                                                    // Tue
+      3: [                                                                      // Wed
+        { start: '13:30', end: '14:30', name: 'Stick Time', type: 'stick' },
+        { start: '17:00', end: '18:00', name: 'Stick Time', type: 'stick' },
+      ],
+      4: [],                                                                    // Thu
+      5: [{ start: '16:00', end: '17:00', name: 'Stick Time', type: 'stick' }], // Fri
+      6: [                                                                      // Sat
+        { start: '07:00', end: '08:00', name: 'Stick Time', type: 'stick' },
+        { start: '18:00', end: '19:00', name: 'Stick Time', type: 'stick' },
+      ],
+    },
+  },
+
+  utcice: {
+    strategy: 'fixed-weekly',
+    surface:  'Ice',
+    timezone: 'America/Los_Angeles',
+    price:    25,
+    // Source: utcice.com/hockey/stick-time/ — "Current Schedule is Mondays at 3pm"
+    // Confirmed Apr 12 2026. Public sessions are on EZFacility widget (not scrapeable).
+    // Only confirmed session hardcoded here. Verify and expand when EZFacility API access obtained.
+    schedule: {
+      0: [],                                                                    // Sun
+      1: [{ start: '15:00', end: '16:00', name: 'Stick Time', type: 'stick' }], // Mon
+      2: [],                                                                    // Tue
+      3: [],                                                                    // Wed
+      4: [],                                                                    // Thu
+      5: [],                                                                    // Fri
+      6: [],                                                                    // Sat
+    },
+  },
+
   // ── STRATEGY B: CivicPlus HTML ────────────────────────────────────────────
 
   stoneham: {
