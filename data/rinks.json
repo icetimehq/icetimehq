@@ -261,13 +261,13 @@
     "address": "4545 La Jolla Village Dr",
     "city": "San Diego, CA 92122",
     "website": "https://utcice.com/public-session-schedule/",
-    "platform": "none",
+    "platform": "statichtml",
     "company": null,
     "facility_id": null,
     "facility_filter": null,
-    "scraper_key": null,
-    "scraper_file": null,
-    "status": "coming_soon"
+    "scraper_key": "utcice",
+    "scraper_file": "api/scrape-statichtml.js",
+    "status": "live"
   },
   "sd_poway": {
     "rink_id": "sd_poway",
@@ -290,14 +290,14 @@
     "region": "San Diego",
     "address": "2283 Cosmos Ct",
     "city": "Carlsbad, CA 92011",
-    "website": "https://icerealmcarlsbad.com/public-skating-schedule",
-    "platform": "none",
+    "website": "https://bondsports.co/activity/programs/CO_ED-adult-HOCKEY/11242",
+    "platform": "statichtml",
     "company": null,
     "facility_id": null,
     "facility_filter": null,
-    "scraper_key": null,
-    "scraper_file": null,
-    "status": "coming_soon"
+    "scraper_key": "carlsbad",
+    "scraper_file": "api/scrape-statichtml.js",
+    "status": "live"
   },
   "sd_kroc": {
     "rink_id": "sd_kroc",
