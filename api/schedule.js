@@ -95,6 +95,10 @@ function nextDateStr(date) {
 }
 
 // ─── BUILD URL (manual — never use URLSearchParams, it encodes brackets) ─────
+// DS1 rinks (no facilityId): include=summary%2Cresource works fine.
+// DS2 rinks (with facilityId): must use include[]=summary&include[]=resource
+//   because DaySmart ignores %2C-encoded commas for multi-facility responses,
+//   returning no resource data and breaking the surface-based facility filter.
 function buildUrl(company, date, endDate, facilityId, includeStr) {
   const parts = [
     'cache[save]=false',
@@ -105,11 +109,14 @@ function buildUrl(company, date, endDate, facilityId, includeStr) {
     'filter[unconstrained]=1',
     `company=${encodeURIComponent(company)}`,
   ];
-  // Build include[] with bracket notation — encodeURIComponent breaks commas
   if (includeStr) {
-    includeStr.split(',').forEach(inc => {
-      parts.push(`include[]=${inc.trim()}`);
-    });
+    if (facilityId) {
+      // DS2: bracket notation required for resource data to be returned
+      includeStr.split(',').forEach(inc => parts.push(`include[]=${inc.trim()}`));
+    } else {
+      // DS1: standard encoding works fine
+      parts.push(`include=${encodeURIComponent(includeStr)}`);
+    }
   }
   if (facilityId) parts.push(`filter[facility_ids][]=${facilityId}`);
   return `${DAYSMART_BASE}?${parts.join('&')}`;
