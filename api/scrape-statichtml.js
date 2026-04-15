@@ -126,25 +126,43 @@ const RINK_SCHEDULES = {
     surface:  'Ice',
     timezone: 'America/Los_Angeles',
     price:    null,
-    // Source: bondsports.co/activity/programs/CO_ED-adult-HOCKEY/11242
-    // April 2026 Stick Time Sessions calendar image — verified Apr 12 2026
-    // NOTE: Schedule is subject to change — check registration page for updates
+    // Sources verified Apr 14 2026:
+    //   Stick Time:   bondsports.co/activity/programs/CO_ED-adult-HOCKEY/11242
+    //   Public Skate: bondsports.co/activity/programs/CO_ED-adult-ICE_SKATING/11241
+    //   Pickup:       icerealmcarlsbad.com/adult-hockey-pick-up-hockey (Mon/Wed/Fri 12pm)
     schedule: {
-      0: [],                                                                    // Sun
-      1: [                                                                      // Mon
-        { start: '13:30', end: '14:30', name: 'Stick Time', type: 'stick' },
-        { start: '17:00', end: '18:00', name: 'Stick Time', type: 'stick' },
+      0: [
+        { start: '12:00', end: '13:45', name: 'Public Skate',  type: 'public' },
       ],
-      2: [],                                                                    // Tue
-      3: [                                                                      // Wed
-        { start: '13:30', end: '14:30', name: 'Stick Time', type: 'stick' },
-        { start: '17:00', end: '18:00', name: 'Stick Time', type: 'stick' },
+      1: [
+        { start: '09:15', end: '10:15', name: 'Public Skate',  type: 'public' },
+        { start: '12:00', end: '13:00', name: 'Pickup Hockey', type: 'pickup' },
+        { start: '13:30', end: '14:30', name: 'Stick Time',    type: 'stick'  },
+        { start: '17:00', end: '18:00', name: 'Stick Time',    type: 'stick'  },
       ],
-      4: [],                                                                    // Thu
-      5: [{ start: '16:00', end: '17:00', name: 'Stick Time', type: 'stick' }], // Fri
-      6: [                                                                      // Sat
-        { start: '07:00', end: '08:00', name: 'Stick Time', type: 'stick' },
-        { start: '18:00', end: '19:00', name: 'Stick Time', type: 'stick' },
+      2: [
+        { start: '09:45', end: '11:45', name: 'Public Skate',  type: 'public' },
+      ],
+      3: [
+        { start: '09:15', end: '10:15', name: 'Public Skate',  type: 'public' },
+        { start: '12:00', end: '13:00', name: 'Pickup Hockey', type: 'pickup' },
+        { start: '13:30', end: '14:30', name: 'Stick Time',    type: 'stick'  },
+        { start: '15:00', end: '16:45', name: 'Public Skate',  type: 'public' },
+        { start: '17:00', end: '18:00', name: 'Stick Time',    type: 'stick'  },
+      ],
+      4: [
+        { start: '10:45', end: '11:45', name: 'Public Skate',  type: 'public' },
+        { start: '15:00', end: '16:45', name: 'Public Skate',  type: 'public' },
+      ],
+      5: [
+        { start: '09:15', end: '10:15', name: 'Public Skate',  type: 'public' },
+        { start: '12:00', end: '13:00', name: 'Pickup Hockey', type: 'pickup' },
+        { start: '19:30', end: '21:30', name: 'Public Skate',  type: 'public' },
+      ],
+      6: [
+        { start: '07:00', end: '08:00', name: 'Stick Time',    type: 'stick'  },
+        { start: '13:00', end: '14:45', name: 'Public Skate',  type: 'public' },
+        { start: '19:15', end: '21:15', name: 'Public Skate',  type: 'public' },
       ],
     },
   },
