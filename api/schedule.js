@@ -27,6 +27,9 @@ function cleanName(raw) {
   n = n.replace(/\s*\(Mar\s+\d+-\d+\)\s*$/, '').trim();
   // Strip facility prefix codes with dash/en-dash: "PI – ", "KHS – ", "GPI – "
   n = n.replace(/^[A-Z]{2,5}\s*[-–]\s*/, '').trim();
+  // Strip "PI FS SKATER-" style: 2-letter code + space + word(s) + dash
+  // e.g. "PI FS SKATER- 60 MIN Open" → "60 MIN Open"
+  n = n.replace(/^[A-Z]{2,5}\s+[A-Z\s]+-\s*/i, '').trim();
   // Strip "GPI SKATER - Mon 5:30am" → take everything after last " - "
   // These are program schedule labels, not session names
   if (/^[A-Z\s]+ - (Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/i.test(n)) {
