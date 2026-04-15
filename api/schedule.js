@@ -67,6 +67,27 @@ function shouldExclude(cleanedName, resourceId) {
   return false;
 }
 
+// ─── DS2 FACILITY PREFIX MAP ──────────────────────────────────────────────────
+// DaySmart rejects include[] param when facility_ids[] is present, so we get
+// no resource/surface data for DS2. Instead we filter by session name prefix.
+// Session names from The Rinks always start with a facility code: PI-, GPI-, etc.
+const DS2_PREFIXES = {
+  'poway': ['PI-', 'PI –', 'PI–', 'PI '],
+  'khs':   ['KHS-', 'KHS –', 'KHS–', 'KHS '],
+  'ai-':   ['AI-', 'AI –', 'AI–'],
+  'gpi':   ['GPI-', 'GPI –', 'GPI–', 'GPI '],
+  'li-':   ['LI-', 'LI –', 'LI–', 'LI '],
+  'yorba': ['YL-', 'YL –', 'YL–', 'YORBA'],
+};
+
+function matchesDS2Prefix(rawName, facilityFilter) {
+  if (!facilityFilter || !rawName) return true; // no filter = keep all
+  const prefixes = DS2_PREFIXES[facilityFilter.toLowerCase()];
+  if (!prefixes) return true; // unknown filter = keep all (safe fallback)
+  const upper = rawName.toUpperCase();
+  return prefixes.some(p => upper.startsWith(p.toUpperCase()));
+}
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function parseTime(iso) {
   const m = (iso || '').match(/T(\d{2}:\d{2})/);
@@ -95,10 +116,6 @@ function nextDateStr(date) {
 }
 
 // ─── BUILD URL (manual — never use URLSearchParams, it encodes brackets) ─────
-// DS1 rinks (no facilityId): include=summary%2Cresource works fine.
-// DS2 rinks (with facilityId): must use include[]=summary&include[]=resource
-//   because DaySmart ignores %2C-encoded commas for multi-facility responses,
-//   returning no resource data and breaking the surface-based facility filter.
 function buildUrl(company, date, endDate, facilityId, includeStr) {
   const parts = [
     'cache[save]=false',
@@ -109,15 +126,11 @@ function buildUrl(company, date, endDate, facilityId, includeStr) {
     'filter[unconstrained]=1',
     `company=${encodeURIComponent(company)}`,
   ];
-  if (includeStr) {
-    if (facilityId) {
-      // DS2: bracket notation required for resource data to be returned
-      includeStr.split(',').forEach(inc => parts.push(`include[]=${inc.trim()}`));
-    } else {
-      // DS1: standard encoding works fine
-      parts.push(`include=${encodeURIComponent(includeStr)}`);
-    }
-  }
+  // DS1 (no facilityId): include works normally
+  // DS2 (facilityId present): DaySmart returns 400 if include is combined with
+  //   filter[facility_ids][] — so we skip include entirely for DS2.
+  //   Filtering is done by session name prefix instead (see normalize()).
+  if (includeStr && !facilityId) parts.push(`include=${encodeURIComponent(includeStr)}`);
   if (facilityId) parts.push(`filter[facility_ids][]=${facilityId}`);
   return `${DAYSMART_BASE}?${parts.join('&')}`;
 }
@@ -168,6 +181,12 @@ function normalize(json, company, date, facilityId, facilityFilter) {
         // Summary is from another facility — use event attributes directly
         rawName = attrs.desc || attrs.name || attrs.title || rawName;
       }
+    }
+
+    // ── DS2 facility filter by name prefix (no resource data available) ─
+    if (facilityId && !matchesDS2Prefix(rawName, facilityFilter)) {
+      filteredByFacility++;
+      continue;
     }
 
     // ── Clean the name ────────────────────────────────────────────────────
