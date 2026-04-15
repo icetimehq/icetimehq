@@ -3,6 +3,10 @@
 // CommonJS (module.exports) — required for Vercel without "type":"module"
 
 const DAYSMART_BASE = 'https://apps.daysmartrecreation.com/dash/jsonapi/api/v1/events';
+// DS2 uses a different API domain — the standard apps.daysmartrecreation.com endpoint
+// rejects include params when facility_ids[] is present. The api. subdomain works correctly.
+const DAYSMART_API_BASE  = 'https://api.daysmartrecreation.com/api/v1/events';
+const DAYSMART_AVAIL_BASE = 'https://api.daysmartrecreation.com/api/v1/date-availabilities';
 
 // ─── CACHE (60 min) ──────────────────────────────────────────────────────────
 const cache = new Map();
@@ -27,9 +31,6 @@ function cleanName(raw) {
   n = n.replace(/\s*\(Mar\s+\d+-\d+\)\s*$/, '').trim();
   // Strip facility prefix codes with dash/en-dash: "PI – ", "KHS – ", "GPI – "
   n = n.replace(/^[A-Z]{2,5}\s*[-–]\s*/, '').trim();
-  // Strip "PI FS SKATER-" style: 2-letter code + space + word(s) + dash
-  // e.g. "PI FS SKATER- 60 MIN Open" → "60 MIN Open"
-  n = n.replace(/^[A-Z]{2,5}\s+[A-Z\s]+-\s*/i, '').trim();
   // Strip "GPI SKATER - Mon 5:30am" → take everything after last " - "
   // These are program schedule labels, not session names
   if (/^[A-Z\s]+ - (Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/i.test(n)) {
@@ -70,27 +71,6 @@ function shouldExclude(cleanedName, resourceId) {
   return false;
 }
 
-// ─── DS2 FACILITY PREFIX MAP ──────────────────────────────────────────────────
-// DaySmart rejects include[] param when facility_ids[] is present, so we get
-// no resource/surface data for DS2. Instead we filter by session name prefix.
-// Session names from The Rinks always start with a facility code: PI-, GPI-, etc.
-const DS2_PREFIXES = {
-  'poway': ['PI-', 'PI –', 'PI–', 'PI '],
-  'khs':   ['KHS-', 'KHS –', 'KHS–', 'KHS '],
-  'ai-':   ['AI-', 'AI –', 'AI–'],
-  'gpi':   ['GPI-', 'GPI –', 'GPI–', 'GPI '],
-  'li-':   ['LI-', 'LI –', 'LI–', 'LI '],
-  'yorba': ['YL-', 'YL –', 'YL–', 'YORBA'],
-};
-
-function matchesDS2Prefix(rawName, facilityFilter) {
-  if (!facilityFilter || !rawName) return true; // no filter = keep all
-  const prefixes = DS2_PREFIXES[facilityFilter.toLowerCase()];
-  if (!prefixes) return true; // unknown filter = keep all (safe fallback)
-  const upper = rawName.toUpperCase();
-  return prefixes.some(p => upper.startsWith(p.toUpperCase()));
-}
-
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function parseTime(iso) {
   const m = (iso || '').match(/T(\d{2}:\d{2})/);
@@ -129,11 +109,7 @@ function buildUrl(company, date, endDate, facilityId, includeStr) {
     'filter[unconstrained]=1',
     `company=${encodeURIComponent(company)}`,
   ];
-  // DS1 (no facilityId): include works normally
-  // DS2 (facilityId present): DaySmart returns 400 if include is combined with
-  //   filter[facility_ids][] — so we skip include entirely for DS2.
-  //   Filtering is done by session name prefix instead (see normalize()).
-  if (includeStr && !facilityId) parts.push(`include=${encodeURIComponent(includeStr)}`);
+  if (includeStr) parts.push(`include=${encodeURIComponent(includeStr)}`);
   if (facilityId) parts.push(`filter[facility_ids][]=${facilityId}`);
   return `${DAYSMART_BASE}?${parts.join('&')}`;
 }
@@ -184,12 +160,6 @@ function normalize(json, company, date, facilityId, facilityFilter) {
         // Summary is from another facility — use event attributes directly
         rawName = attrs.desc || attrs.name || attrs.title || rawName;
       }
-    }
-
-    // ── DS2 facility filter by name prefix (no resource data available) ─
-    if (facilityId && !matchesDS2Prefix(rawName, facilityFilter)) {
-      filteredByFacility++;
-      continue;
     }
 
     // ── Clean the name ────────────────────────────────────────────────────
@@ -256,6 +226,80 @@ function normalize(json, company, date, facilityId, facilityFilter) {
   return deduped;
 }
 
+// ─── DS2 FETCH (two-step: date-availabilities → events by ID) ────────────────
+// For The Rinks multi-facility: fetch event IDs for this date filtered by
+// facility_id from the locations[] parallel array, then fetch those events.
+// The api.daysmartrecreation.com endpoint works correctly with full include data.
+async function fetchDS2(company, date, facilityId, facilityFilter) {
+  const headers = {
+    'Accept':     'application/vnd.api+json, application/json',
+    'User-Agent': 'IceTimeHQ/1.0 (+https://icetimehq.com)',
+  };
+  const endDate = nextDateStr(date);
+
+  // Step 1: Get event IDs for this date filtered by facility location
+  const availUrl = `${DAYSMART_AVAIL_BASE}?cache[save]=false&page[size]=365&sort=id`
+    + `&filter[date__gte]=${date}&filter[date__lte]=${date}&company=${encodeURIComponent(company)}`;
+
+  console.log(`[schedule] DS2 Step1: ${availUrl}`);
+  let availRes;
+  try {
+    availRes = await fetch(availUrl, { headers, signal: AbortSignal.timeout(8000) });
+  } catch (err) {
+    console.error(`[schedule] DS2 avail fetch error: ${err.message}`);
+    return null;
+  }
+  if (!availRes.ok) {
+    console.error(`[schedule] DS2 avail ${availRes.status}`);
+    return null;
+  }
+
+  const availJson = await availRes.json();
+  const dayEntry = (availJson.data || []).find(d => d.id === date);
+  if (!dayEntry) {
+    console.log(`[schedule] DS2 no avail entry for ${date}`);
+    return { json: { data: [], included: [] }, includeStr: 'ds2-avail' };
+  }
+
+  // Filter event IDs by facility_id using parallel locations[] array
+  const events    = dayEntry.attributes.events    || [];
+  const locations = dayEntry.attributes.locations || [];
+  const facIdNum  = Number(facilityId);
+  const eventIds  = events.filter((_, i) => locations[i] === facIdNum);
+
+  console.log(`[schedule] DS2 Step1: ${events.length} total events, ${eventIds.length} for facility ${facilityId}`);
+
+  if (eventIds.length === 0) {
+    return { json: { data: [], included: [] }, includeStr: 'ds2-avail' };
+  }
+
+  // Step 2: Fetch full event data for those IDs
+  const idList = eventIds.join(',');
+  const eventsUrl = `${DAYSMART_API_BASE}?cache[save]=false&page[size]=50&sort=end,start`
+    + `&filter[id__in]=${idList}`
+    + `&filter[start_date__gte]=${date}&filter[start_date__lte]=${endDate}`
+    + `&filter[unconstrained]=1`
+    + `&include=summary,resource,homeTeam,homeTeam.product`
+    + `&company=${encodeURIComponent(company)}`;
+
+  console.log(`[schedule] DS2 Step2: fetching ${eventIds.length} events`);
+  let evRes;
+  try {
+    evRes = await fetch(eventsUrl, { headers, signal: AbortSignal.timeout(8000) });
+  } catch (err) {
+    console.error(`[schedule] DS2 events fetch error: ${err.message}`);
+    return null;
+  }
+  if (!evRes.ok) {
+    console.error(`[schedule] DS2 events ${evRes.status}`);
+    return null;
+  }
+
+  const evJson = await evRes.json();
+  console.log(`[schedule] DS2 Step2: ${(evJson.data || []).length} events returned`);
+  return { json: evJson, includeStr: 'ds2-two-step' };
+}
+
 // ─── FETCH (tries include strategies until one works) ─────────────────────────
 // When facilityFilter is set we MUST have resource data to filter by surface.
 // So we never fall back to the empty-include strategy in that case.
@@ -277,12 +321,7 @@ async function fetchDaySmart(company, date, facilityId, facilityFilter) {
     'User-Agent': 'IceTimeHQ/1.0 (+https://icetimehq.com)',
   };
 
-  // DS2 rinks (facilityId present): DaySmart rejects ANY include param when
-  // facility_ids[] is also present. Use empty strategy only — filtering is
-  // done by session name prefix in normalize() instead.
-  const strategies = facilityId
-    ? ['']
-    : (facilityFilter ? INCLUDE_STRATEGIES_FILTERED : INCLUDE_STRATEGIES_FULL);
+  const strategies = facilityFilter ? INCLUDE_STRATEGIES_FILTERED : INCLUDE_STRATEGIES_FULL;
 
   for (const includeStr of strategies) {
     const url = buildUrl(company, date, endDate, facilityId, includeStr);
@@ -343,7 +382,11 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  const result = await fetchDaySmart(company, date, facility_id || null, facility_filter || null);
+  // DS2 rinks (The Rinks network) use a two-step API approach via api.daysmartrecreation.com
+  // DS1 rinks use the standard apps.daysmartrecreation.com/dash/jsonapi endpoint
+  const result = facility_id
+    ? await fetchDS2(company, date, facility_id, facility_filter || null)
+    : await fetchDaySmart(company, date, null, null);
 
   if (!result) {
     return res.status(200).json({
