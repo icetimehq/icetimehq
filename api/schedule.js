@@ -274,7 +274,12 @@ async function fetchDaySmart(company, date, facilityId, facilityFilter) {
     'User-Agent': 'IceTimeHQ/1.0 (+https://icetimehq.com)',
   };
 
-  const strategies = facilityFilter ? INCLUDE_STRATEGIES_FILTERED : INCLUDE_STRATEGIES_FULL;
+  // DS2 rinks (facilityId present): DaySmart rejects ANY include param when
+  // facility_ids[] is also present. Use empty strategy only — filtering is
+  // done by session name prefix in normalize() instead.
+  const strategies = facilityId
+    ? ['']
+    : (facilityFilter ? INCLUDE_STRATEGIES_FILTERED : INCLUDE_STRATEGIES_FULL);
 
   for (const includeStr of strategies) {
     const url = buildUrl(company, date, endDate, facilityId, includeStr);
