@@ -126,40 +126,42 @@ const RINK_SCHEDULES = {
     surface:  'Ice',
     timezone: 'America/Los_Angeles',
     price:    null,
-    // Sources verified Apr 14 2026:
-    //   Stick Time:   bondsports.co/activity/programs/CO_ED-adult-HOCKEY/11242
+    // ⚠ MANUAL UPDATE REQUIRED MONTHLY
+    // Last verified: April 2026 (both images confirmed Apr 17 2026 via DevTools audit)
+    // BondSports API confirmed: returns program metadata only — schedule is a Cloudinary image,
+    // NOT structured data. No live scraper possible without headless browser.
+    // TO UPDATE: check both pages below for the new monthly schedule image, then update this block.
     //   Public Skate: bondsports.co/activity/programs/CO_ED-adult-ICE_SKATING/11241
-    //   Pickup:       icerealmcarlsbad.com/adult-hockey-pick-up-hockey (Mon/Wed/Fri 12pm)
+    //   Stick Time:   bondsports.co/activity/programs/CO_ED-adult-HOCKEY/11242
+    //   Pickup Hockey: icerealmcarlsbad.com/adult-hockey-pick-up-hockey (Mon/Wed/Fri 12pm — fixed)
+    // NOTE: Schedule varies week-to-week within months (Sat evening, Thu sessions inconsistent).
+    // This block reflects the dominant/most common pattern for April 2026.
     schedule: {
-      0: [
+      0: [                                                                       // Sun
         { start: '12:00', end: '13:45', name: 'Public Skate',  type: 'public' },
       ],
-      1: [
+      1: [                                                                       // Mon
         { start: '09:15', end: '10:15', name: 'Public Skate',  type: 'public' },
         { start: '12:00', end: '13:00', name: 'Pickup Hockey', type: 'pickup' },
         { start: '13:30', end: '14:30', name: 'Stick Time',    type: 'stick'  },
         { start: '17:00', end: '18:00', name: 'Stick Time',    type: 'stick'  },
       ],
-      2: [
+      2: [                                                                       // Tue
         { start: '09:45', end: '11:45', name: 'Public Skate',  type: 'public' },
       ],
-      3: [
+      3: [                                                                       // Wed
         { start: '09:15', end: '10:15', name: 'Public Skate',  type: 'public' },
         { start: '12:00', end: '13:00', name: 'Pickup Hockey', type: 'pickup' },
         { start: '13:30', end: '14:30', name: 'Stick Time',    type: 'stick'  },
-        { start: '15:00', end: '16:45', name: 'Public Skate',  type: 'public' },
         { start: '17:00', end: '18:00', name: 'Stick Time',    type: 'stick'  },
       ],
-      4: [
-        { start: '10:45', end: '11:45', name: 'Public Skate',  type: 'public' },
-        { start: '15:00', end: '16:45', name: 'Public Skate',  type: 'public' },
-      ],
-      5: [
+      4: [],                                                                     // Thu — irregular, omitted
+      5: [                                                                       // Fri
         { start: '09:15', end: '10:15', name: 'Public Skate',  type: 'public' },
         { start: '12:00', end: '13:00', name: 'Pickup Hockey', type: 'pickup' },
         { start: '19:30', end: '21:30', name: 'Public Skate',  type: 'public' },
       ],
-      6: [
+      6: [                                                                       // Sat
         { start: '07:00', end: '08:00', name: 'Stick Time',    type: 'stick'  },
         { start: '13:00', end: '14:45', name: 'Public Skate',  type: 'public' },
         { start: '19:15', end: '21:15', name: 'Public Skate',  type: 'public' },
